@@ -1,0 +1,81 @@
+import requests
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error
+import numpy as np
+
+driver_id = 55
+print("You entered driver ID:", driver_id)
+car_data_url = f"https://api.openf1.org/v1/car_data?driver_number="+str(driver_id)+f"&session_key=9159"
+drivers_url = f"https://api.openf1.org/v1/drivers?driver_number="+str(driver_id)+f"&session_key=9158"
+laps_url = f"https://api.openf1.org/v1/laps?session_key=9161&driver_number="+str(driver_id)
+location_url = f"https://api.openf1.org/v1/location?session_key=9161&driver_number="+str(driver_id)
+position_url = f"https://api.openf1.org/v1/position?meeting_key=1217&driver_number="+str(driver_id)
+race_control_url = f"https://api.openf1.org/v1/race_control?flag=BLACK%20AND%20WHITE&driver_number="+str(driver_id)
+def fetch_data(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()  
+    else:
+        print("Error fetching data from", url, ":", response.status_code)
+        return None  
+car_data = fetch_data(car_data_url)
+drivers_data = fetch_data(drivers_url)
+laps_data = fetch_data(laps_url)
+location_data = fetch_data(location_url)
+position_data = fetch_data(position_url)
+race_control_data = fetch_data(race_control_url)
+def preprocess_data(car_data, drivers_data, laps_data):
+    features = []
+    labels = []
+    for driver in drivers_data:
+        driver_number = driver["driver_number"]
+        car_specs = next((car for car in car_data if car["driver_number"] == driver_number), None)
+        lap_info = next((lap for lap in laps_data if lap["driver_number"] == driver_number), None)
+        if car_specs and lap_info:
+            feature = [
+                car_specs["speed"],         
+                car_specs["n_gear"],        
+                car_specs["rpm"],           
+                lap_info["lap_duration"],   
+                lap_info["i1_speed"],       
+                lap_info["i2_speed"],       
+                lap_info["st_speed"]        
+            ]
+            features.append(feature)
+            position_info = next((pos for pos in position_data if pos["driver_number"] == driver_number), None)
+            if position_info:
+                labels.append(position_info["position"])  
+    return np.array(features), np.array(labels)
+x, y = preprocess_data(car_data, drivers_data, laps_data)
+if len(x) > 0 and len(y) > 0:
+    if len(x) == 1:
+        X_train, X_test = x, x  
+        y_train, y_test = y, y
+        print("Warning only one sample of data being used here.")
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        print(f"Mean Squared Error: {mse}")
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        print(f"Mean Squared Error: {mse}")
+    new_driver_features = np.array([[315, 8, 11023, 91.743, 307, 277, 298]]) 
+    if len(x) > 1:
+        new_driver_scaled = scaler.transform(new_driver_features)
+    else:
+        new_driver_scaled = new_driver_features 
+    predicted_position = model.predict(new_driver_scaled)
+    print("Predicted Position:", predicted_position)
+
+else:
+    print("Insufficient data to train the model.")
